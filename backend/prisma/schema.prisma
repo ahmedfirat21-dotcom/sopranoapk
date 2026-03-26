@@ -1,0 +1,182 @@
+// ── Prisma Schema for SopranoChat ─────────────────────────────────
+// Supabase (PostgreSQL) + Prisma ORM
+// Premium ağırlıklı graf bağlantı modeli, yankı zincirleri, fısıltı DM
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 1. USER (AURA)
+// ═══════════════════════════════════════════════════════════════════
+model User {
+  id              String   @id @default(uuid())
+  username        String   @unique               // Benzersiz Soprano ID
+  email           String   @unique
+  passwordHash    String
+  displayName     String?
+  avatarUrl       String?
+  bio             String?
+  resonanceScore  Int      @default(0)            // Platformdaki genel aura/kalite puanı
+  auraColor       String   @default("#6A5A8E")
+  isOnline        Boolean  @default(false)
+  lastSeenAt      DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // ── İlişkiler ──
+  connectionsA     Connection[]       @relation("userA")
+  connectionsB     Connection[]       @relation("userB")
+  echoes           Echo[]
+  echoResonances   EchoResonance[]
+  sentWhispers     Whisper[]          @relation("sender")
+  receivedWhispers Whisper[]          @relation("receiver")
+  hostedRooms      FrequencyRoom[]    @relation("host")
+  roomParticipants RoomParticipant[]
+  showcaseEchoes   EchoShowcase[]
+
+  @@index([username])
+  @@index([resonanceScore(sort: Desc)])
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 2. CONNECTION (AĞAÇ BAĞLANTILARI — Ağırlıklı Graf)
+//    Klasik follower/following YERİNE ağırlıklı çift yönlü bağ.
+//    connectionWeight zamanla decay eder (lastInteractionAt bazlı).
+// ═══════════════════════════════════════════════════════════════════
+model Connection {
+  id                String   @id @default(uuid())
+  userA_id          String                        // Bağlantı kuran 1. kişi
+  userB_id          String                        // Bağlantı kuran 2. kişi
+  connectionWeight  Float    @default(1.0)        // Etkileşimle artar, zamanla azalır (decay)
+  interactionCount  Int      @default(0)
+  lastInteractionAt DateTime @default(now())      // Weight decay formülü için kritik
+  createdAt         DateTime @default(now())
+
+  userA             User     @relation("userA", fields: [userA_id], references: [id], onDelete: Cascade)
+  userB             User     @relation("userB", fields: [userB_id], references: [id], onDelete: Cascade)
+
+  @@unique([userA_id, userB_id])
+  @@index([userA_id, connectionWeight(sort: Desc)])  // "En yakın bağlantılar" sorgusu
+  @@index([userB_id, connectionWeight(sort: Desc)])
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 3. ECHO (YANKI — Açık Tartışma / Ses-Video Post)
+//    parentId ile kök-dal ilişkisi kurularak Yankı Zincirleri oluşur.
+// ═══════════════════════════════════════════════════════════════════
+model Echo {
+  id             String    @id @default(uuid())
+  authorId       String
+  mediaUrl       String                           // R2'daki ses/video dosya URL'si
+  mediaType      MediaType @default(AUDIO)
+  duration       Int                              // Saniye cinsinden süre
+  parentId       String?                          // Self-relation: kök yankıya referans (cevap ise)
+  resonanceCount Int       @default(0)            // Toplam dinlenme/uyumlanma sayısı
+  createdAt      DateTime  @default(now())
+
+  author         User       @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parent         Echo?      @relation("EchoChain", fields: [parentId], references: [id])
+  replies        Echo[]     @relation("EchoChain")  // Alt dallar (cevap yankılar)
+  resonances     EchoResonance[]
+  showcases      EchoShowcase[]
+
+  @@index([authorId])
+  @@index([parentId])
+  @@index([createdAt(sort: Desc)])
+}
+
+// ── EchoResonance (Çoka-Çok: Hangi kullanıcı hangi yankıyla rezone oldu) ──
+model EchoResonance {
+  id         String   @id @default(uuid())
+  echoId     String
+  userId     String
+  listenedAt DateTime @default(now())
+
+  echo       Echo     @relation(fields: [echoId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([echoId, userId])                      // Kullanıcı başına 1 rezonans
+}
+
+// ── EchoShowcase (Profildeki vitrin yankılar) ──
+model EchoShowcase {
+  userId String
+  echoId String
+  order  Int    @default(0)
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  echo   Echo   @relation(fields: [echoId], references: [id], onDelete: Cascade)
+
+  @@id([userId, echoId])
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 4. WHISPER (FISILTJ — Premium DM)
+//    isResonated = "Okundu / Mavi Tik"in premium versiyonu
+// ═══════════════════════════════════════════════════════════════════
+model Whisper {
+  id          String    @id @default(uuid())
+  senderId    String
+  receiverId  String
+  mediaUrl    String                              // R2'daki medya dosyası
+  mediaType   MediaType @default(AUDIO)
+  duration    Int                                 // Saniye cinsinden süre
+  isResonated Boolean   @default(false)           // Dinlendi mi? (Premium okundu bilgisi)
+  resonatedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  sender      User      @relation("sender",   fields: [senderId],   references: [id], onDelete: Cascade)
+  receiver    User      @relation("receiver", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@index([senderId, receiverId, createdAt(sort: Desc)])
+  @@index([receiverId, isResonated])
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 5. FREQUENCY ROOM (Canlı Odalar — LiveKit Entegrasyonu)
+// ═══════════════════════════════════════════════════════════════════
+model FrequencyRoom {
+  id              String   @id @default(uuid())
+  hostId          String                          // Oda sahibi
+  title           String                          // Örn: "Gece Yarısı İtirafları"
+  liveKitRoomName String   @unique                // LiveKit SFU oda referansı
+  isActive        Boolean  @default(true)
+  maxSeats        Int      @default(12)
+  createdAt       DateTime @default(now())
+
+  host            User     @relation("host", fields: [hostId], references: [id], onDelete: Cascade)
+  participants    RoomParticipant[]
+}
+
+model RoomParticipant {
+  id       String   @id @default(uuid())
+  roomId   String
+  userId   String
+  role     RoomRole @default(LISTENER)
+  joinedAt DateTime @default(now())
+
+  room     FrequencyRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId])
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ENUMS
+// ═══════════════════════════════════════════════════════════════════
+enum MediaType {
+  AUDIO
+  VIDEO
+}
+
+enum RoomRole {
+  HOST
+  SPEAKER
+  LISTENER
+}
