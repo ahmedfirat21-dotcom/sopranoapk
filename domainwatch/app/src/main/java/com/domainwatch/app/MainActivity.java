@@ -14,7 +14,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.regex.Pattern;
 public class MainActivity extends Activity {
- private LinearLayout cards;private EditText input;private TextView status;private Button refresh;
+ private LinearLayout cards;private EditText input;private TextView status;private Button refresh; private static final String NPREF="notify_settings";
  private static final Pattern DOMAIN=Pattern.compile("^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,63}$");
  @Override public void onCreate(Bundle b){
  super.onCreate(b);
@@ -43,9 +43,10 @@ public class MainActivity extends Activity {
   input=new EditText(this);input.setHint("ornek.com");input.setSingleLine(true);row.addView(input,new LinearLayout.LayoutParams(0,dp(52),1));
   Button add=new Button(this);add.setText("EKLE");row.addView(add,new LinearLayout.LayoutParams(dp(92),dp(52)));root.addView(row);
   refresh=new Button(this);refresh.setText("TÜMÜNÜ ŞİMDİ KONTROL ET");root.addView(refresh,new LinearLayout.LayoutParams(-1,dp(50)));
+  Button notifyBtn=new Button(this);notifyBtn.setText("BİLDİRİM AYARLARI");root.addView(notifyBtn,new LinearLayout.LayoutParams(-1,dp(50)));
   status=t("Hazır",13,false);status.setTextColor(Color.DKGRAY);status.setPadding(0,dp(4),0,dp(8));root.addView(status);
   ScrollView sv=new ScrollView(this);cards=new LinearLayout(this);cards.setOrientation(LinearLayout.VERTICAL);sv.addView(cards);root.addView(sv,new LinearLayout.LayoutParams(-1,0,1));setContentView(root);
-  add.setOnClickListener(v->addDomain());refresh.setOnClickListener(v->refreshAll());
+  add.setOnClickListener(v->addDomain());refresh.setOnClickListener(v->refreshAll());notifyBtn.setOnClickListener(v->showNotificationSettings());
  }
  private void addDomain(){String d=input.getText().toString().trim().toLowerCase(Locale.ROOT).replace("https://","").replace("http://","");int slash=d.indexOf('/');if(slash>=0)d=d.substring(0,slash);if(d.startsWith("www."))d=d.substring(4);if(!DOMAIN.matcher(d).matches()){toast("Geçerli bir domain yaz.");return;}boolean added=DomainStore.add(this,d);input.setText("");render();if(added)refreshOne(d);else toast("Bu domain zaten listede.");}
  private void refreshAll(){List<JSONObject> items=DomainStore.load(this);if(items.isEmpty()){toast("Önce domain ekle.");return;}status.setText("Kontrol ediliyor…");refresh.setEnabled(false);new Thread(()->{for(JSONObject o:items){JSONObject fresh=RdapClient.check(o.optString("domain"));DomainStore.replace(this,fresh);runOnUiThread(this::render);}runOnUiThread(()->{status.setText("Kontrol tamamlandı");refresh.setEnabled(true);});}).start();}
@@ -71,5 +72,30 @@ public class MainActivity extends Activity {
  private String remaining(String exp,String av){if("available".equals(av))return "Boşa düşmüş görünüyor";if(exp==null||exp.isEmpty())return "—";try{long sec=Duration.between(Instant.now(),Instant.parse(exp)).getSeconds();if(sec<=0)return "Süre geçmiş; silinme aşaması ayrıca kontrol edilmeli";long d=sec/86400,h=(sec%86400)/3600,m=(sec%3600)/60;return d+" gün "+h+" saat "+m+" dk";}catch(Exception e){return "—";}}
  private TextView t(String s,int sp,boolean bold){TextView v=new TextView(this);v.setText(s);v.setTextSize(sp);v.setTextColor(Color.rgb(28,30,34));if(bold)v.setTypeface(null,1);return v;}
  private int dp(int v){return(int)(v*getResources().getDisplayMetrics().density+0.5f);}private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_SHORT).show();}
+ private void showNotificationSettings(){
+  android.content.SharedPreferences p=getSharedPreferences(NPREF,MODE_PRIVATE);
+  String[] labels={"Bildirimleri etkinleştir","Domain boşa düşünce","pendingDelete olunca","redemptionPeriod olunca","Bitişe 7 gün veya daha az kalınca"};
+  boolean[] checked={
+    p.getBoolean("enabled",true),
+    p.getBoolean("available",true),
+    p.getBoolean("pendingDelete",true),
+    p.getBoolean("redemption",true),
+    p.getBoolean("expiring",true)
+  };
+  new android.app.AlertDialog.Builder(this)
+   .setTitle("Bildirim Ayarları")
+   .setMultiChoiceItems(labels,checked,(d,which,isChecked)->checked[which]=isChecked)
+   .setPositiveButton("KAYDET",(d,w)->{
+     p.edit()
+      .putBoolean("enabled",checked[0])
+      .putBoolean("available",checked[1])
+      .putBoolean("pendingDelete",checked[2])
+      .putBoolean("redemption",checked[3])
+      .putBoolean("expiring",checked[4]).apply();
+     toast("Bildirim ayarları kaydedildi.");
+     if(checked[0])try{askNotifications();}catch(Throwable ignored){}
+   })
+   .setNegativeButton("İPTAL",null).show();
+ }
  private void askNotifications(){if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},11);}
 }
