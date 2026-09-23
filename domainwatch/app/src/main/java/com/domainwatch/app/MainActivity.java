@@ -16,7 +16,25 @@ import java.util.regex.Pattern;
 public class MainActivity extends Activity {
  private LinearLayout cards;private EditText input;private TextView status;private Button refresh;
  private static final Pattern DOMAIN=Pattern.compile("^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,63}$");
- @Override public void onCreate(Bundle b){super.onCreate(b);buildUi();DomainMonitorJob.schedule(this);DomainMonitorJob.createChannel(this);askNotifications();render();}
+ @Override public void onCreate(Bundle b){
+ super.onCreate(b);
+ try{
+  buildUi();
+  DomainMonitorJob.createChannel(this);
+  render();
+  try{askNotifications();}catch(Throwable ignored){}
+  new Handler(Looper.getMainLooper()).postDelayed(()->{try{DomainMonitorJob.schedule(this);}catch(Throwable ignored){}},1200);
+ }catch(Throwable fatal){
+  LinearLayout fallback=new LinearLayout(this);
+  fallback.setOrientation(LinearLayout.VERTICAL);
+  fallback.setPadding(32,48,32,32);
+  TextView t=new TextView(this);
+  t.setText("Domain Nöbetçisi\n\nUygulama başlatıldı ancak arayüz yüklenirken bir sorun oluştu. Uygulamayı yeniden açmayı deneyin.");
+  t.setTextSize(18);
+  fallback.addView(t);
+  setContentView(fallback);
+ }
+}
  private void buildUi(){
   int pad=dp(16);LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(pad,pad,pad,pad);root.setBackgroundColor(Color.rgb(246,247,249));
   TextView title=t("Domain Nöbetçisi",28,true);root.addView(title);
