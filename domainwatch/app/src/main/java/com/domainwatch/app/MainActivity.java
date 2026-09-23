@@ -60,7 +60,7 @@ public class MainActivity extends Activity {
   LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);TextView name=t(icon+"  "+o.optString("domain"),20,true);head.addView(name,new LinearLayout.LayoutParams(0,-2,1));
   Button del=new Button(this);del.setText("SİL");del.setTextSize(12);head.addView(del,new LinearLayout.LayoutParams(dp(72),dp(44)));box.addView(head);del.setOnClickListener(v->{DomainStore.remove(this,o.optString("domain"));render();});
   String availability="available".equals(av)?"Kayıt için uygun görünüyor":"registered".equals(av)?"Kayıtlı":"Durum belirsiz";addLine(box,"Durum",availability);
-  String exp=o.optString("expires");addLine(box,"Bitiş tarihi",fmt(exp));addLine(box,"Kalan süre",remaining(exp,av));addLine(box,"Registrar",empty(o.optString("registrar")));
+  String exp=o.optString("expires");addLine(box,"Bitiş tarihi",fmt(exp));addLine(box,"Kalan süre",remaining(exp,av));addLine(box,"Registrar",empty(o.optString("registrar")));addLine(box,"Sorgu kaynağı",empty(o.optString("source")));
   addLine(box,"Durum kodları",join(o.optJSONArray("statuses")));addLine(box,"Kayıt tarihi",fmt(o.optString("created")));addLine(box,"Son güncelleme",fmt(o.optString("updated")));
   addLine(box,"Name server",join(o.optJSONArray("nameservers")));addLine(box,"Son kontrol",fmt(o.optString("lastChecked")));
   TextView note=t("Not: Sürenin dolması domainin hemen boşa düştüğü anlamına gelmez. redemptionPeriod / pendingDelete gibi durumları da kontrol et.",12,false);note.setTextColor(Color.GRAY);note.setPadding(0,dp(8),0,0);box.addView(note);return box;
