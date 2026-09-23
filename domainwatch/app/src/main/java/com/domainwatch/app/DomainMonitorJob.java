@@ -33,6 +33,7 @@ public class DomainMonitorJob extends JobService {
       String d=old.optString("domain");
       String before=old.optString("availability","unknown");
       JSONObject fresh=RdapClient.check(d);
+      PricingClient.enrich(this,fresh);
       DomainStore.replace(this,fresh);
       handleNotifications(old,fresh,d,before);
      }
