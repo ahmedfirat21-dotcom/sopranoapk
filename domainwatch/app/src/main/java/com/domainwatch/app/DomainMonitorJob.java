@@ -34,7 +34,7 @@ public class DomainMonitorJob extends JobService {
       String before=old.optString("availability","unknown");
       JSONObject fresh=RdapClient.check(d);
       DomainStore.replace(this,fresh);
-      if(!"available".equals(before)&&"available".equals(fresh.optString("availability"))) notifyAvailable(d);
+      handleNotifications(old,fresh,d,before);
      }
     }catch(Throwable ignored){}
     finally{try{jobFinished(p,false);}catch(Throwable ignored){}}
@@ -44,6 +44,50 @@ public class DomainMonitorJob extends JobService {
  }
 
  @Override public boolean onStopJob(JobParameters p){return true;}
+
+ private void handleNotifications(JSONObject old, JSONObject fresh, String d, String before){
+  try{
+   android.content.SharedPreferences p=getSharedPreferences("notify_settings",MODE_PRIVATE);
+   if(!p.getBoolean("enabled",true))return;
+   String av=fresh.optString("availability","unknown");
+   if(p.getBoolean("available",true)&&!"available".equals(before)&&"available".equals(av)){
+    notifyCustom("Domain boşa düştü",d+" kayıt için uygun görünüyor.",Math.abs(d.hashCode())); return;
+   }
+   String statuses=fresh.optJSONArray("statuses")!=null?fresh.optJSONArray("statuses").toString().toLowerCase():"";
+   String oldStatuses=old.optJSONArray("statuses")!=null?old.optJSONArray("statuses").toString().toLowerCase():"";
+   if(p.getBoolean("pendingDelete",true)&&statuses.contains("pendingdelete")&&!oldStatuses.contains("pendingdelete")){
+    notifyCustom("Domain pendingDelete aşamasında",d+" silinme aşamasına girdi.",Math.abs((d+"pd").hashCode()));
+   }
+   if(p.getBoolean("redemption",true)&&statuses.contains("redemptionperiod")&&!oldStatuses.contains("redemptionperiod")){
+    notifyCustom("Domain redemptionPeriod aşamasında",d+" redemptionPeriod durumuna girdi.",Math.abs((d+"rp").hashCode()));
+   }
+   if(p.getBoolean("expiring",true)){
+    String exp=fresh.optString("expires");
+    if(exp!=null&&!exp.isEmpty()){
+     try{
+      long days=java.time.Duration.between(java.time.Instant.now(),java.time.Instant.parse(exp)).toDays();
+      String key="expwarn_"+d;
+      if(days>=0&&days<=7&&!p.getBoolean(key,false)){
+       notifyCustom("Domain süresi yaklaşıyor",d+" için yaklaşık "+days+" gün kaldı.",Math.abs((d+"ex").hashCode()));
+       p.edit().putBoolean(key,true).apply();
+      }
+     }catch(Throwable ignored){}
+    }
+   }
+  }catch(Throwable ignored){}
+ }
+
+ private void notifyCustom(String title,String text,int id){
+  try{
+   createChannel(this);
+   Intent i=new Intent(this,MainActivity.class);
+   PendingIntent pi=PendingIntent.getActivity(this,0,i,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
+   Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,CHANNEL):new Notification.Builder(this);
+   b.setSmallIcon(android.R.drawable.stat_notify_more).setContentTitle(title).setContentText(text).setAutoCancel(true).setContentIntent(pi).setPriority(Notification.PRIORITY_HIGH);
+   NotificationManager nm=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);
+   if(nm!=null)nm.notify(id,b.build());
+  }catch(Throwable ignored){}
+ }
 
  private void notifyAvailable(String d){
   try{
