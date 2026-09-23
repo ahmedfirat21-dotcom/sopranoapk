@@ -44,13 +44,14 @@ public class MainActivity extends Activity {
   Button add=new Button(this);add.setText("EKLE");row.addView(add,new LinearLayout.LayoutParams(dp(92),dp(52)));root.addView(row);
   refresh=new Button(this);refresh.setText("TÜMÜNÜ ŞİMDİ KONTROL ET");root.addView(refresh,new LinearLayout.LayoutParams(-1,dp(50)));
   Button notifyBtn=new Button(this);notifyBtn.setText("BİLDİRİM AYARLARI");root.addView(notifyBtn,new LinearLayout.LayoutParams(-1,dp(50)));
+  Button priceBtn=new Button(this);priceBtn.setText("FİYAT API AYARI");root.addView(priceBtn,new LinearLayout.LayoutParams(-1,dp(50)));
   status=t("Hazır",13,false);status.setTextColor(Color.DKGRAY);status.setPadding(0,dp(4),0,dp(8));root.addView(status);
   ScrollView sv=new ScrollView(this);cards=new LinearLayout(this);cards.setOrientation(LinearLayout.VERTICAL);sv.addView(cards);root.addView(sv,new LinearLayout.LayoutParams(-1,0,1));setContentView(root);
-  add.setOnClickListener(v->addDomain());refresh.setOnClickListener(v->refreshAll());notifyBtn.setOnClickListener(v->showNotificationSettings());
+  add.setOnClickListener(v->addDomain());refresh.setOnClickListener(v->refreshAll());notifyBtn.setOnClickListener(v->showNotificationSettings());priceBtn.setOnClickListener(v->showPricingSettings());
  }
  private void addDomain(){String d=input.getText().toString().trim().toLowerCase(Locale.ROOT).replace("https://","").replace("http://","");int slash=d.indexOf('/');if(slash>=0)d=d.substring(0,slash);if(d.startsWith("www."))d=d.substring(4);if(!DOMAIN.matcher(d).matches()){toast("Geçerli bir domain yaz.");return;}boolean added=DomainStore.add(this,d);input.setText("");render();if(added)refreshOne(d);else toast("Bu domain zaten listede.");}
- private void refreshAll(){List<JSONObject> items=DomainStore.load(this);if(items.isEmpty()){toast("Önce domain ekle.");return;}status.setText("Kontrol ediliyor…");refresh.setEnabled(false);new Thread(()->{for(JSONObject o:items){JSONObject fresh=RdapClient.check(o.optString("domain"));DomainStore.replace(this,fresh);runOnUiThread(this::render);}runOnUiThread(()->{status.setText("Kontrol tamamlandı");refresh.setEnabled(true);});}).start();}
- private void refreshOne(String d){status.setText(d+" kontrol ediliyor…");new Thread(()->{JSONObject f=RdapClient.check(d);DomainStore.replace(this,f);runOnUiThread(()->{render();status.setText("Hazır");});}).start();}
+ private void refreshAll(){List<JSONObject> items=DomainStore.load(this);if(items.isEmpty()){toast("Önce domain ekle.");return;}status.setText("Kontrol ediliyor…");refresh.setEnabled(false);new Thread(()->{for(JSONObject o:items){JSONObject fresh=RdapClient.check(o.optString("domain"));PricingClient.enrich(this,fresh);DomainStore.replace(this,fresh);runOnUiThread(this::render);}runOnUiThread(()->{status.setText("Kontrol tamamlandı");refresh.setEnabled(true);});}).start();}
+ private void refreshOne(String d){status.setText(d+" kontrol ediliyor…");new Thread(()->{JSONObject f=RdapClient.check(d);PricingClient.enrich(this,f);DomainStore.replace(this,f);runOnUiThread(()->{render();status.setText("Hazır");});}).start();}
  private void render(){cards.removeAllViews();List<JSONObject> items=DomainStore.load(this);if(items.isEmpty()){TextView e=t("Henüz domain eklenmedi.",16,false);e.setPadding(0,dp(22),0,0);cards.addView(e);return;}for(JSONObject o:items)cards.addView(card(o));}
  private View card(JSONObject o){
   LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(16),dp(14),dp(16),dp(14));
@@ -61,6 +62,12 @@ public class MainActivity extends Activity {
   Button del=new Button(this);del.setText("SİL");del.setTextSize(12);head.addView(del,new LinearLayout.LayoutParams(dp(72),dp(44)));box.addView(head);del.setOnClickListener(v->{DomainStore.remove(this,o.optString("domain"));render();});
   String availability="available".equals(av)?"Kayıt için uygun görünüyor":"registered".equals(av)?"Kayıtlı":"Durum belirsiz";addLine(box,"Durum",availability);
   String exp=o.optString("expires");addLine(box,"Bitiş tarihi",fmt(exp));addLine(box,"Kalan süre",remaining(exp,av));addLine(box,"Registrar",empty(o.optString("registrar")));addLine(box,"Sorgu kaynağı",empty(o.optString("source")));
+  addLine(box,"Kayıt fiyatı",money(o,"registrationPrice"));
+  addLine(box,"İlk dönem fiyatı",money(o,"firstTermPrice"));
+  addLine(box,"Yenileme fiyatı",money(o,"renewalPrice"));
+  addLine(box,"Premium/Listelenen ücret",money(o,"premiumFee"));
+  addLine(box,"Envanter",empty(o.optString("inventory")));
+  addLine(box,"Fiyat kaynağı",empty(o.optString("priceSource")));
   addLine(box,"Durum kodları",join(o.optJSONArray("statuses")));addLine(box,"Kayıt tarihi",fmt(o.optString("created")));addLine(box,"Son güncelleme",fmt(o.optString("updated")));
   addLine(box,"Name server",join(o.optJSONArray("nameservers")));addLine(box,"Son kontrol",fmt(o.optString("lastChecked")));
   TextView note=t("Not: Sürenin dolması domainin hemen boşa düştüğü anlamına gelmez. redemptionPeriod / pendingDelete gibi durumları da kontrol et.",12,false);note.setTextColor(Color.GRAY);note.setPadding(0,dp(8),0,0);box.addView(note);return box;
@@ -72,6 +79,32 @@ public class MainActivity extends Activity {
  private String remaining(String exp,String av){if("available".equals(av))return "Boşa düşmüş görünüyor";if(exp==null||exp.isEmpty())return "—";try{long sec=Duration.between(Instant.now(),Instant.parse(exp)).getSeconds();if(sec<=0)return "Süre geçmiş; silinme aşaması ayrıca kontrol edilmeli";long d=sec/86400,h=(sec%86400)/3600,m=(sec%3600)/60;return d+" gün "+h+" saat "+m+" dk";}catch(Exception e){return "—";}}
  private TextView t(String s,int sp,boolean bold){TextView v=new TextView(this);v.setText(s);v.setTextSize(sp);v.setTextColor(Color.rgb(28,30,34));if(bold)v.setTypeface(null,1);return v;}
  private int dp(int v){return(int)(v*getResources().getDisplayMetrics().density+0.5f);}private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_SHORT).show();}
+ private void showPricingSettings(){
+  android.content.SharedPreferences p=getSharedPreferences("pricing_settings",MODE_PRIVATE);
+  EditText token=new EditText(this);
+  token.setHint("GoDaddy Personal Access Token");
+  token.setSingleLine(false);
+  token.setText(p.getString("godaddy_pat",""));
+  int pad=dp(16);
+  android.widget.FrameLayout wrap=new android.widget.FrameLayout(this);
+  wrap.setPadding(pad,0,pad,0);wrap.addView(token);
+  new android.app.AlertDialog.Builder(this)
+   .setTitle("Fiyat API Ayarı")
+   .setMessage("Gerçek GoDaddy fiyatlarını çekmek için Personal Access Token gir. Token yalnızca bu cihazda saklanır.")
+   .setView(wrap)
+   .setPositiveButton("KAYDET",(d,w)->{p.edit().putString("godaddy_pat",token.getText().toString().trim()).apply();toast("Fiyat API ayarı kaydedildi.");})
+   .setNeutralButton("TEMİZLE",(d,w)->{p.edit().remove("godaddy_pat").apply();toast("Fiyat API tokenı silindi.");})
+   .setNegativeButton("İPTAL",null).show();
+ }
+ private String money(JSONObject o,String key){
+  if(!o.has(key))return "—";
+  try{
+   double v=o.optDouble(key,Double.NaN);if(Double.isNaN(v))return "—";
+   String cur=o.optString(key+"Currency","");
+   return String.format(java.util.Locale.getDefault(),"%.2f %s",v,cur).trim();
+  }catch(Exception e){return "—";}
+ }
+
  private void showNotificationSettings(){
   android.content.SharedPreferences p=getSharedPreferences(NPREF,MODE_PRIVATE);
   String[] labels={"Bildirimleri etkinleştir","Domain boşa düşünce","pendingDelete olunca","redemptionPeriod olunca","Bitişe 7 gün veya daha az kalınca"};
